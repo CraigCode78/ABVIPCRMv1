@@ -26,16 +26,18 @@ DEFAULT_MODEL = 'gpt-4'  # Change to 'gpt-3.5-turbo' if needed
 def generate_openai_response(prompt, max_tokens=250, temperature=0.7, retries=3):
     for attempt in range(retries):
         try:
-            response = client.chat.completions.create(model=DEFAULT_MODEL,
-            messages=[{'role': 'user', 'content': prompt}],
-            max_tokens=max_tokens,
-            temperature=temperature,
-            n=1)
+            response = client.chat.completions.create(
+                model=DEFAULT_MODEL,
+                messages=[{'role': 'user', 'content': prompt}],
+                max_tokens=max_tokens,
+                temperature=temperature,
+                n=1
+            )
             # Validate response structure
-            if 'choices' in response and len(response.choices) > 0:
+            if hasattr(response, 'choices') and len(response.choices) > 0:
                 return response.choices[0].message.content.strip()
             else:
-                st.error("Received unexpected response structure from OpenAI API.")
+                st.error(f"Unexpected API response structure: {response}")
                 return ""
         except Exception as e:
             error_message = str(e).lower()
@@ -105,10 +107,14 @@ def analyze_sentiment(vip_info):
     # Validate and convert sentiment to float
     try:
         sentiment_score = float(sentiment)
-        return sentiment_score
+        if -1 <= sentiment_score <= 1:
+            return sentiment_score
+        else:
+            st.warning(f"Sentiment score {sentiment_score} is out of expected range [-1, 1].")
+            return None
     except ValueError:
-        st.error("Invalid sentiment score received.")
-        return ""
+        st.warning(f"Invalid sentiment score received: '{sentiment}'. Expected a number between -1 and 1.")
+        return None
 
 def load_vip_data():
     # Expanded VIP data
@@ -224,9 +230,11 @@ def main():
     if st.button("Analyze Sentiment"):
         with st.spinner("Analyzing sentiment..."):
             sentiment = analyze_sentiment(vip_info)
-        if sentiment:
+        if sentiment is not None:
             st.subheader("Sentiment Analysis")
-            st.write(f"Sentiment Score: {sentiment}")
+            st.write(f"Sentiment Score: {sentiment:.2f}")
+        else:
+            st.error("Unable to determine sentiment score.")
 
 if __name__ == "__main__":
     main()
