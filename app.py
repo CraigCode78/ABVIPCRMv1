@@ -1,73 +1,177 @@
-# app.py
-
 import os
 import openai
+from openai import OpenAI
 import streamlit as st
 import pandas as pd
 import random
+import time
+from string import Template
 
 # Set the OpenAI API key
-openai.api_key = st.secrets["OPENAI_API_KEY"]
+def get_openai_key():
+    # First, try to get the key from environment variables
+    api_key = os.environ.get('OPENAI_API_KEY')
+    if not api_key:
+        try:
+            api_key = st.secrets["OPENAI_API_KEY"]
+        except (AttributeError, KeyError):
+            st.error("OpenAI API key not found. Please set it in Streamlit secrets or environment variables.")
+            st.stop()
+    return api_key
 
-def load_vip_data():
-    # Your expanded VIP data
-    # ... (same as before)
-    pass  # Replace with your actual data loading code
+# Initialize the OpenAI client
+client = OpenAI(api_key=get_openai_key())
+DEFAULT_MODEL = 'gpt-4'  # Change to 'gpt-3.5-turbo' if needed
+
+def generate_openai_response(prompt, max_tokens=250, temperature=0.7, retries=3):
+    for attempt in range(retries):
+        try:
+            response = client.chat.completions.create(model=DEFAULT_MODEL,
+            messages=[{'role': 'user', 'content': prompt}],
+            max_tokens=max_tokens,
+            temperature=temperature,
+            n=1)
+            # Validate response structure
+            if 'choices' in response and len(response.choices) > 0:
+                return response.choices[0].message.content.strip()
+            else:
+                st.error("Received unexpected response structure from OpenAI API.")
+                return ""
+        except Exception as e:
+            error_message = str(e).lower()
+            if "rate limit" in error_message or "quota" in error_message:
+                if attempt < retries - 1:
+                    wait_time = 2 ** attempt
+                    st.warning(f"Rate limit exceeded. Retrying in {wait_time} seconds...")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    st.error("Rate limit exceeded. Please try again later.")
+                    return ""
+            else:
+                st.error(f"Error during OpenAI API call: {e}")
+                return ""
+
+INSIGHTS_PROMPT_TEMPLATE = Template("""
+Analyze the following VIP client's data and provide insights:
+
+Name: $name
+Purchase History: $purchase_history
+Interaction History: $interaction_history
+Preferred Contact Times: $preferred_contact_times
+Last Contact Date: $last_contact_date
+Sentiment Score: $sentiment_score
+
+Provide suggestions on how to best engage with this client.
+""")
+
+MESSAGE_PROMPT_TEMPLATE = Template("""
+Compose a personalized invitation email to $name for the upcoming Art Basel event.
+Mention their interest in $purchase_history and reference their previous interaction: $interaction_history.
+Suggest scheduling a meeting during their preferred contact time: $preferred_contact_times.
+""")
+
+SENTIMENT_PROMPT_TEMPLATE = Template("""
+Analyze the sentiment of the following interaction history and provide a score between -1 (negative) and 1 (positive):
+
+$interaction_history
+""")
 
 def generate_vip_insights(vip_info):
-    prompt = f"""
-    Analyze the following VIP client's data and provide insights:
-
-    Name: {vip_info['Name']}
-    Purchase History: {vip_info['Purchase_History']}
-    Interaction History: {vip_info['Interaction_History']}
-    Preferred Contact Times: {vip_info['Preferred_Contact_Times']}
-    Last Contact Date: {vip_info['Last_Contact_Date']}
-    Sentiment Score: {vip_info['Sentiment_Score']}
-
-    Provide suggestions on how to best engage with this client.
-    """
-    response = openai.ChatCompletion.create(
-        model="gpt-4o",
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=250,
-        temperature=0.7,
-        n=1,
+    prompt = INSIGHTS_PROMPT_TEMPLATE.substitute(
+        name=vip_info['Name'],
+        purchase_history=vip_info['Purchase_History'],
+        interaction_history=vip_info['Interaction_History'],
+        preferred_contact_times=vip_info['Preferred_Contact_Times'],
+        last_contact_date=vip_info['Last_Contact_Date'],
+        sentiment_score=vip_info['Sentiment_Score']
     )
-    insights = response['choices'][0]['message']['content'].strip()
-    return insights
+    return generate_openai_response(prompt)
 
 def generate_personalized_message(vip_info):
-    prompt = f"""
-    Compose a personalized invitation email to {vip_info['Name']} for the upcoming Art Basel event.
-    Mention their interest in {vip_info['Purchase_History']} and reference their previous interaction: {vip_info['Interaction_History']}.
-    Suggest scheduling a meeting during their preferred contact time: {vip_info['Preferred_Contact_Times']}.
-    """
-    response = openai.ChatCompletion.create(
-        model="gpt-4o",
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=250,
-        temperature=0.7,
-        n=1,
+    prompt = MESSAGE_PROMPT_TEMPLATE.substitute(
+        name=vip_info['Name'],
+        purchase_history=vip_info['Purchase_History'],
+        interaction_history=vip_info['Interaction_History'],
+        preferred_contact_times=vip_info['Preferred_Contact_Times']
     )
-    message = response['choices'][0]['message']['content'].strip()
-    return message
+    return generate_openai_response(prompt)
 
 def analyze_sentiment(vip_info):
-    prompt = f"""
-    Analyze the sentiment of the following interaction history and provide a score between -1 (negative) and 1 (positive):
-
-    {vip_info['Interaction_History']}
-    """
-    response = openai.ChatCompletion.create(
-        model="gpt-4o",
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=60,
-        temperature=0,
-        n=1,
+    prompt = SENTIMENT_PROMPT_TEMPLATE.substitute(
+        interaction_history=vip_info['Interaction_History']
     )
-    sentiment = response['choices'][0]['message']['content'].strip()
-    return sentiment
+    sentiment = generate_openai_response(prompt, max_tokens=60, temperature=0)
+    # Validate and convert sentiment to float
+    try:
+        sentiment_score = float(sentiment)
+        return sentiment_score
+    except ValueError:
+        st.error("Invalid sentiment score received.")
+        return ""
+
+def load_vip_data():
+    # Expanded VIP data
+    data = {
+        'VIP_ID': list(range(1, 11)),
+        'Name': [
+            'Alice Smith', 'Bob Johnson', 'Carol Williams', 'David Brown', 'Eva Davis',
+            'Frank Miller', 'Grace Wilson', 'Henry Moore', 'Isabella Taylor', 'Jack Anderson'
+        ],
+        'Purchase_History': [
+            'Contemporary Art, Sculptures',
+            'Modern Art, Installations',
+            'Abstract Paintings, Digital Art',
+            'Impressionist Paintings, Photography',
+            'Sculptures, Mixed Media',
+            'Street Art, Graffiti Art',
+            'Classical Paintings, Antique Artifacts',
+            'Pop Art, Limited Edition Prints',
+            'Kinetic Art, Interactive Installations',
+            'Video Art, Virtual Reality Art'
+        ],
+        'Interaction_History': [
+            'Attended Art Basel Miami 2022',
+            'VIP Lounge Visit in Basel 2021',
+            'Missed last event due to scheduling',
+            'Regular attendee since 2015',
+            'Hosted private gallery tour in 2019',
+            'Attended online exhibitions during 2020',
+            'Special guest at Art Basel Hong Kong 2018',
+            "Participated in collector's panel discussion",
+            'Sponsored young artists program in 2021',
+            'Expressed interest in emerging digital art'
+        ],
+        'Preferred_Contact_Times': [
+            'Weekdays, Afternoon',
+            'Weekends, Morning',
+            'Weekdays, Evening',
+            'Weekends, Afternoon',
+            'Weekdays, Morning',
+            'Weekends, Evening',
+            'Weekdays, Afternoon',
+            'Weekdays, Morning',
+            'Weekends, Afternoon',
+            'Weekdays, Evening'
+        ],
+        'Last_Contact_Date': [
+            '2023-09-15',
+            '2023-09-10',
+            '2023-09-05',
+            '2023-09-01',
+            '2023-08-28',
+            '2023-08-25',
+            '2023-08-20',
+            '2023-08-15',
+            '2023-08-10',
+            '2023-08-05'
+        ],
+        'Sentiment_Score': [
+            0.8, 0.6, 0.4, 0.9, 0.7, 0.5, 0.85, 0.65, 0.75, 0.95
+        ]
+    }
+    df = pd.DataFrame(data)
+    return df
 
 def get_engagement_score():
     # Simulated engagement score between 50 and 100
@@ -104,22 +208,25 @@ def main():
     if st.button("Generate AI Insights"):
         with st.spinner("Generating insights..."):
             insights = generate_vip_insights(vip_info)
-        st.subheader("AI-Generated Insights")
-        st.write(insights)
+        if insights:
+            st.subheader("AI-Generated Insights")
+            st.write(insights)
 
     # Generate Personalized Message
     if st.button("Generate Personalized Message"):
         with st.spinner("Generating message..."):
             message = generate_personalized_message(vip_info)
-        st.subheader("Personalized Message")
-        st.write(message)
+        if message:
+            st.subheader("Personalized Message")
+            st.write(message)
 
     # Analyze Sentiment
     if st.button("Analyze Sentiment"):
         with st.spinner("Analyzing sentiment..."):
             sentiment = analyze_sentiment(vip_info)
-        st.subheader("Sentiment Analysis")
-        st.write(f"Sentiment Score: {sentiment}")
+        if sentiment:
+            st.subheader("Sentiment Analysis")
+            st.write(f"Sentiment Score: {sentiment}")
 
 if __name__ == "__main__":
     main()
