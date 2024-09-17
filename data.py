@@ -1,11 +1,12 @@
 # data.py
 
 import pandas as pd
+import random
+from datetime import datetime, timedelta
 
 def load_vip_data():
-    # Expanded VIP data
     data = {
-        'VIP_ID': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+        'VIP_ID': list(range(1, 11)),
         'Name': [
             'Alice Smith', 'Bob Johnson', 'Carol Williams', 'David Brown', 'Eva Davis',
             'Frank Miller', 'Grace Wilson', 'Henry Moore', 'Isabella Taylor', 'Jack Anderson'
@@ -30,7 +31,7 @@ def load_vip_data():
             'Hosted private gallery tour in 2019',
             'Attended online exhibitions during 2020',
             'Special guest at Art Basel Hong Kong 2018',
-            'Participated in collector\'s panel discussion',
+            "Participated in collector's panel discussion",
             'Sponsored young artists program in 2021',
             'Expressed interest in emerging digital art'
         ],
@@ -62,5 +63,29 @@ def load_vip_data():
             0.8, 0.6, 0.4, 0.9, 0.7, 0.5, 0.85, 0.65, 0.75, 0.95
         ]
     }
-    df = pd.DataFrame(data)
-    return df
+    return pd.DataFrame(data)
+
+def generate_upcoming_events():
+    events = [
+        "Contemporary Art Fair in New York",
+        "Modern Sculptures Exhibition in Paris",
+        "Digital Art Symposium in Tokyo",
+        "Impressionist Masterpieces Tour in London",
+        "Street Art Festival in Berlin",
+        "Classical Art Auction in Rome",
+        "Pop Art Retrospective in Los Angeles",
+        "Interactive Art Installation in Amsterdam",
+        "Virtual Reality Art Experience in San Francisco",
+        "Emerging Artists Showcase in Miami"
+    ]
+    start_date = datetime.now() + timedelta(days=30)
+    upcoming_events = []
+    for event in events:
+        event_date = start_date + timedelta(days=random.randint(0, 60))
+        upcoming_events.append({
+            'name': event,
+            'date': event_date.strftime('%Y-%m-%d')
+        })
+    return upcoming_events
+
+# You can add more sample data functions here if needed for other features
