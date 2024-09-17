@@ -10,13 +10,14 @@ from string import Template
 from data import load_vip_data, generate_upcoming_events
 
 def get_openai_key():
-    # First, try to get the key from environment variables
-    api_key = os.environ.get('OPENAI_API_KEY')
-    if not api_key:
-        try:
-            api_key = st.secrets["OPENAI_API_KEY"]
-        except (AttributeError, KeyError):
-            st.error("OpenAI API key not found. Please set it in Streamlit secrets or environment variables.")
+    # First, try to get the key from Streamlit secrets
+    try:
+        api_key = st.secrets["OPENAI_API_KEY"]
+    except KeyError:
+        # If not found in secrets, try environment variables
+        api_key = os.environ.get('OPENAI_API_KEY')
+        if not api_key:
+            st.error("OpenAI API key not found in Streamlit secrets or environment variables.")
             st.stop()
     return api_key
 
