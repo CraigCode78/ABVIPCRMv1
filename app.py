@@ -21,7 +21,7 @@ def get_openai_key():
 
 # Initialize the OpenAI client
 client = OpenAI(api_key=get_openai_key())
-DEFAULT_MODEL = 'gpt-4'  # Change to 'gpt-3.5-turbo' if needed
+DEFAULT_MODEL = 'gpt-4o'  # Change to 'gpt-3.5-turbo' if needed
 
 def generate_openai_response(prompt, max_tokens=250, temperature=0.7, retries=3):
     for attempt in range(retries):
