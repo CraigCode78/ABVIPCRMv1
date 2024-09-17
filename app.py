@@ -5,9 +5,10 @@ import streamlit as st
 import pandas as pd
 import random
 import time
+import re
 from string import Template
+from data import load_vip_data, generate_upcoming_events
 
-# Set the OpenAI API key
 def get_openai_key():
     # First, try to get the key from environment variables
     api_key = os.environ.get('OPENAI_API_KEY')
@@ -40,18 +41,10 @@ def generate_openai_response(prompt, max_tokens=250, temperature=0.7, retries=3)
                 st.error(f"Unexpected API response structure: {response}")
                 return ""
         except Exception as e:
-            error_message = str(e).lower()
-            if "rate limit" in error_message or "quota" in error_message:
-                if attempt < retries - 1:
-                    wait_time = 2 ** attempt
-                    st.warning(f"Rate limit exceeded. Retrying in {wait_time} seconds...")
-                    time.sleep(wait_time)
-                    continue
-                else:
-                    st.error("Rate limit exceeded. Please try again later.")
-                    return ""
+            st.error(f"Error during OpenAI API call: {str(e)}")
+            if attempt < retries - 1:
+                st.warning(f"Retrying... (Attempt {attempt + 2} of {retries})")
             else:
-                st.error(f"Error during OpenAI API call: {e}")
                 return ""
 
 INSIGHTS_PROMPT_TEMPLATE = Template("""
@@ -74,9 +67,11 @@ Suggest scheduling a meeting during their preferred contact time: $preferred_con
 """)
 
 SENTIMENT_PROMPT_TEMPLATE = Template("""
-Analyze the sentiment of the following interaction history and provide a score between -1 (negative) and 1 (positive):
+Analyze the sentiment of the following interaction history and provide a score between -1 (very negative) and 1 (very positive):
 
 $interaction_history
+
+Please respond with only a number between -1 and 1, representing the sentiment score.
 """)
 
 def generate_vip_insights(vip_info):
@@ -103,98 +98,91 @@ def analyze_sentiment(vip_info):
     prompt = SENTIMENT_PROMPT_TEMPLATE.substitute(
         interaction_history=vip_info['Interaction_History']
     )
-    sentiment = generate_openai_response(prompt, max_tokens=60, temperature=0)
-    # Validate and convert sentiment to float
-    try:
-        sentiment_score = float(sentiment)
-        if -1 <= sentiment_score <= 1:
-            return sentiment_score
-        else:
-            st.warning(f"Sentiment score {sentiment_score} is out of expected range [-1, 1].")
-            return None
-    except ValueError:
-        st.warning(f"Invalid sentiment score received: '{sentiment}'. Expected a number between -1 and 1.")
-        return None
-
-def load_vip_data():
-    # Expanded VIP data
-    data = {
-        'VIP_ID': list(range(1, 11)),
-        'Name': [
-            'Alice Smith', 'Bob Johnson', 'Carol Williams', 'David Brown', 'Eva Davis',
-            'Frank Miller', 'Grace Wilson', 'Henry Moore', 'Isabella Taylor', 'Jack Anderson'
-        ],
-        'Purchase_History': [
-            'Contemporary Art, Sculptures',
-            'Modern Art, Installations',
-            'Abstract Paintings, Digital Art',
-            'Impressionist Paintings, Photography',
-            'Sculptures, Mixed Media',
-            'Street Art, Graffiti Art',
-            'Classical Paintings, Antique Artifacts',
-            'Pop Art, Limited Edition Prints',
-            'Kinetic Art, Interactive Installations',
-            'Video Art, Virtual Reality Art'
-        ],
-        'Interaction_History': [
-            'Attended Art Basel Miami 2022',
-            'VIP Lounge Visit in Basel 2021',
-            'Missed last event due to scheduling',
-            'Regular attendee since 2015',
-            'Hosted private gallery tour in 2019',
-            'Attended online exhibitions during 2020',
-            'Special guest at Art Basel Hong Kong 2018',
-            "Participated in collector's panel discussion",
-            'Sponsored young artists program in 2021',
-            'Expressed interest in emerging digital art'
-        ],
-        'Preferred_Contact_Times': [
-            'Weekdays, Afternoon',
-            'Weekends, Morning',
-            'Weekdays, Evening',
-            'Weekends, Afternoon',
-            'Weekdays, Morning',
-            'Weekends, Evening',
-            'Weekdays, Afternoon',
-            'Weekdays, Morning',
-            'Weekends, Afternoon',
-            'Weekdays, Evening'
-        ],
-        'Last_Contact_Date': [
-            '2023-09-15',
-            '2023-09-10',
-            '2023-09-05',
-            '2023-09-01',
-            '2023-08-28',
-            '2023-08-25',
-            '2023-08-20',
-            '2023-08-15',
-            '2023-08-10',
-            '2023-08-05'
-        ],
-        'Sentiment_Score': [
-            0.8, 0.6, 0.4, 0.9, 0.7, 0.5, 0.85, 0.65, 0.75, 0.95
-        ]
-    }
-    df = pd.DataFrame(data)
-    return df
+    sentiment_response = generate_openai_response(prompt, max_tokens=100, temperature=0)
+    
+    # Try to extract a numerical value from the response
+    numerical_match = re.search(r'(-?\d+(\.\d+)?)', sentiment_response)
+    if numerical_match:
+        try:
+            sentiment_score = float(numerical_match.group(1))
+            if -1 <= sentiment_score <= 1:
+                return sentiment_score
+            else:
+                st.warning(f"Extracted sentiment score {sentiment_score} is out of expected range [-1, 1].")
+        except ValueError:
+            pass
+    
+    # If no valid numerical value found, estimate based on the text
+    lower_response = sentiment_response.lower()
+    if 'positive' in lower_response:
+        return 0.5
+    elif 'negative' in lower_response:
+        return -0.5
+    elif 'neutral' in lower_response:
+        return 0
+    else:
+        st.warning(f"Unable to determine sentiment score from response: '{sentiment_response}'")
+        return 0  # Default to neutral
 
 def get_engagement_score():
     # Simulated engagement score between 50 and 100
     return random.randint(50, 100)
 
+# New functions
+def generate_engagement_suggestions(vip_info):
+    prompt = f"Based on the VIP's interests in {vip_info['Purchase_History']} and past interaction of {vip_info['Interaction_History']}, suggest 3 personalized ways to engage with them."
+    return generate_openai_response(prompt)
+
+def recommend_events(vip_info, upcoming_events):
+    events_str = ", ".join([f"{e['name']} on {e['date']}" for e in upcoming_events])
+    prompt = f"Given the VIP's interest in {vip_info['Purchase_History']}, which of these upcoming events would they likely be interested in: {events_str}? Explain why for the top 2 recommendations."
+    return generate_openai_response(prompt)
+
+def generate_conversation_starters(vip_info):
+    prompt = f"Create 3 engaging conversation starters for a VIP interested in {vip_info['Purchase_History']} with a recent interaction of {vip_info['Interaction_History']}."
+    return generate_openai_response(prompt)
+
+def generate_vip_summary(vip_info):
+    prompt = f"Create a concise 3-4 sentence summary of the VIP based on this information: {vip_info}. Highlight key interests and important points for engagement."
+    return generate_openai_response(prompt)
+
+def plan_follow_up_actions(vip_info, interaction_notes):
+    prompt = f"Based on the VIP's profile ({vip_info}) and recent interaction notes ({interaction_notes}), suggest 3 follow-up actions for the next 2 weeks."
+    return generate_openai_response(prompt)
+
+def curate_personalized_content(vip_info):
+    prompt = f"Suggest 5 recent articles, videos, or artworks that would interest a VIP with these interests: {vip_info['Purchase_History']}."
+    return generate_openai_response(prompt)
+
+# Main app
 def main():
     st.title("Art Basel AI-Driven CRM Prototype")
+    
+    # Debug information
+    st.sidebar.write("Debug Information:")
+    api_key = get_openai_key()
+    st.sidebar.write(f"API Key (first 5 chars): {api_key[:5]}...")
+    
+    # Test API connection
+    try:
+        test_response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": "Hello, World!"}],
+            max_tokens=5
+        )
+        st.sidebar.success("API connection test successful!")
+    except Exception as e:
+        st.sidebar.error(f"API connection test failed: {str(e)}")
 
     # Load VIP Data
     vip_data = load_vip_data()
+    upcoming_events = generate_upcoming_events()
 
     # Sidebar for VIP Selection
-    vip_names = vip_data['Name'].tolist()
-    selected_vip = st.sidebar.selectbox("Select VIP Client", vip_names)
+    selected_vip = st.sidebar.selectbox("Select VIP Client", vip_data['Name'].tolist())
 
     # Retrieve VIP Information
-    vip_info = vip_data[vip_data['Name'] == selected_vip].iloc[0]
+    vip_info = vip_data[vip_data['Name'] == selected_vip].iloc[0].to_dict()
 
     # Display VIP Profile
     st.header(f"Profile: {vip_info['Name']}")
@@ -235,6 +223,49 @@ def main():
             st.write(f"Sentiment Score: {sentiment:.2f}")
         else:
             st.error("Unable to determine sentiment score.")
+
+    # VIP Summary
+    if st.button("Generate VIP Summary"):
+        with st.spinner("Generating VIP summary..."):
+            summary = generate_vip_summary(vip_info)
+        st.subheader("VIP Summary")
+        st.write(summary)
+
+    # Engagement Suggestions
+    if st.button("Generate Engagement Suggestions"):
+        with st.spinner("Generating engagement suggestions..."):
+            suggestions = generate_engagement_suggestions(vip_info)
+        st.subheader("Engagement Suggestions")
+        st.write(suggestions)
+
+    # Event Recommendations
+    if st.button("Recommend Events"):
+        with st.spinner("Generating event recommendations..."):
+            recommendations = recommend_events(vip_info, upcoming_events)
+        st.subheader("Event Recommendations")
+        st.write(recommendations)
+
+    # Conversation Starters
+    if st.button("Generate Conversation Starters"):
+        with st.spinner("Generating conversation starters..."):
+            starters = generate_conversation_starters(vip_info)
+        st.subheader("Conversation Starters")
+        st.write(starters)
+
+    # Follow-up Action Planner
+    interaction_notes = st.text_area("Enter recent interaction notes:")
+    if st.button("Plan Follow-up Actions"):
+        with st.spinner("Planning follow-up actions..."):
+            actions = plan_follow_up_actions(vip_info, interaction_notes)
+        st.subheader("Follow-up Action Plan")
+        st.write(actions)
+
+    # Personalized Content Curator
+    if st.button("Curate Personalized Content"):
+        with st.spinner("Curating personalized content..."):
+            content = curate_personalized_content(vip_info)
+        st.subheader("Personalized Content Recommendations")
+        st.write(content)
 
 if __name__ == "__main__":
     main()
